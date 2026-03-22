@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Shift-logging</title>
+    <style>
+        :root { 
+            --primary: #3b82f6; --tax: #fb7185; --ni: #f472b6; --success: #10b981; 
+            --bg: #111827; --card: #1f2937; --text-main: #f3f4f6; --text-dim: #9ca3af;
+            --border: #374151; --warn: #f59e0b;
+        }
+        
+        body { font-family: -apple-system, sans-serif; margin: 0; background: var(--bg); color: var(--text-main); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+        #dbOverlay { position: fixed; inset: 0; background: var(--bg); z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; text-align: center; }
+        .db-btn { width: 100%; max-width: 300px; padding: 20px; border-radius: 16px; font-weight: 800; border: 2px solid var(--primary); background: transparent; color: var(--primary); cursor: pointer; margin-bottom: 15px; text-transform: uppercase; }
+        .db-btn-solid { background: var(--primary); color: white; border: none; }
+
+        .live-clock { background: #000; color: #ffffff; text-align: center; padding: 8px; font-family: monospace; font-size: 14px; border-bottom: 1px solid var(--border); letter-spacing: 1px; }
+
+        .header-section { padding: 15px; background: var(--card); border-bottom: 1px solid var(--border); }
+        .month-container { text-align: center; flex: 1; }
+        .xl-timeframe { font-size: 28px; font-weight: 900; color: #ffffff; display: block; line-height: 1; }
+        .xl-year { font-size: 12px; font-weight: 600; color: var(--text-dim); display: block; margin-top: 4px; letter-spacing: 1px; }
+        
+        .nav-controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .nav-btn { background: transparent; border: 1px solid var(--border); border-radius: 12px; width: 44px; height: 44px; color: white; font-size: 20px; }
+
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; padding-top: 10px; border-top: 1px solid var(--border); }
+        .stat-label { font-size: 10px; text-transform: uppercase; font-weight: 700; color: var(--text-dim); }
+        .stat-val { font-size: 18px; font-weight: 800; display: block; }
+
+        .main-scroll { flex: 1; overflow-y: auto; padding: 15px; }
+        .card { background: var(--card); padding: 15px; border-radius: 18px; border: 1px solid var(--border); margin-bottom: 15px; }
+        
+        label { font-size: 11px; font-weight: 700; color: var(--text-dim); margin-bottom: 4px; display: block; }
+        input, select { width: 100%; padding: 14px; border-radius: 12px; border: 1px solid var(--border); background: #111827; color: white; font-size: 16px; box-sizing: border-box; }
+        
+        .btn-action { width: 100%; padding: 18px; border-radius: 16px; font-weight: 800; cursor: pointer; margin-bottom: 10px; text-transform: uppercase; background: transparent; transition: opacity 0.2s; }
+        .btn-action:active { opacity: 0.6; }
+        
+        .start-btn { border: 2px solid var(--success); color: var(--success); }
+        .stop-btn { border: 2px solid var(--warn); color: var(--warn); }
+        .save-btn { border: 2px solid var(--primary); color: var(--primary); }
+        .del-btn { background: var(--tax); border: none; color: white; margin-top: 10px; }
+
+        .live-info-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 10px; }
+
+        .qr-container { display: flex; justify-content: center; margin-bottom: 15px; }
+        .qr-image { width: 50vw; height: 50vw; border-radius: 12px; border: 4px solid white; background: white; }
+
+        .shift-table { width: 100%; border-collapse: collapse; margin-bottom: 50px; }
+        .shift-row { border-bottom: 1px solid var(--border); }
+        .shift-row td { padding: 12px 0; }
+        .info-emp { font-weight: 700; font-size: 14px; display: block; color: var(--text-main); }
+        .info-meta { color: var(--text-dim); font-size: 11px; }
+        .pay-gross { font-weight: 800; font-size: 15px; color: var(--success); text-align: right; }
+    </style>
+</head>
+<body>
+
+<div id="liveClock" class="live-clock">00/00/0000 00:00:00</div>
+
+<div id="dbOverlay">
+    <h1 style="color:white; margin-bottom: 5px;">Shift-logging</h1>
+    <p style="color:var(--text-dim); margin-bottom: 30px; font-size: 12px;">Work Database Management</p>
+    <button class="db-btn db-btn-solid" onclick="initExistingDB()">📂 Open Existing File</button>
+    <button class="db-btn" onclick="initNewDB()">+ Create New File</button>
+</div>
+
+<div class="header-section">
+    <div class="nav-controls">
+        <button class="nav-btn" onclick="changeMonth(-1)">❮</button>
+        <div class="month-container">
+            <span class="xl-timeframe" id="xlMonth">Month</span>
+            <span class="xl-year" id="xlYear">2026</span>
+        </div>
+        <button class="nav-btn" onclick="changeMonth(1)">❯</button>
+    </div>
+    <div class="stats-grid">
+        <div style="text-align: left;"><span class="stat-label">Deductions (Est)</span><span class="stat-val" style="color:var(--tax)" id="monthDeduct">£0.00</span></div>
+        <div style="text-align: right;"><span class="stat-label">Monthly Gross</span><span class="stat-val" style="color:var(--success); font-size:24px;" id="monthGross">£0.00</span></div>
+    </div>
+</div>
+
+<div class="main-scroll">
+    <div id="liveArea" class="card" style="display:none; border:2px solid var(--warn); background: #1e1b10;">
+        <span style="font-weight:900; color:var(--warn); display:block; text-align:center; margin-bottom:10px;">🔴 LIVE RECORDING</span>
+        
+        <div class="qr-container">
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=1926228711-2024-03-19" class="qr-image" alt="Shift QR Code">
+        </div>
+
+        <div class="live-info-row">
+            <span style="font-size: 11px; color: var(--text-dim);">Logged Start:</span>
+            <span id="displayStartTime" style="font-weight: 900; color: var(--success); font-size: 16px;">00:00</span>
+        </div>
+        <input list="empList" id="liveEmp" placeholder="Employer Name" style="margin-bottom:10px;">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px;">
+            <input list="rateList" id="liveRate" placeholder="Rate (£)">
+            <select id="liveTax"><option value="1255L">1255L</option><option value="BR">BR</option></select>
+        </div>
+    </div>
+
+    <button id="startBtn" class="btn-action start-btn" onclick="startShift()">Start Live Shift</button>
+    <button id="endBtn" class="btn-action stop-btn" onclick="endShift()" style="display:none;">End & Save Shift</button>
+
+    <div class="card" id="formBox">
+        <input type="hidden" id="editIdx" value="-1">
+        <label>Employer</label>
+        <input list="empList" id="empInput" placeholder="Employer Name" style="margin-bottom:15px;">
+        <datalist id="empList"></datalist>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px;">
+            <div><label>Date</label><input type="date" id="date"></div>
+            <div><label>Tax Code</label><select id="tax"><option value="1255L">1255L</option><option value="BR">BR</option></select></div>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px;">
+            <div><label>Start</label><input type="time" id="sTime"></div>
+            <div><label>End</label><input type="time" id="eTime"></div>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:15px;">
+            <div>
+                <label>Pay Rate (£)</label>
+                <input list="rateList" id="rateInput" placeholder="0.00">
+                <datalist id="rateList"></datalist>
+            </div>
+            <div><label>Break (m)</label><input type="number" id="brk" value="0"></div>
+        </div>
+        
+        <button class="btn-action save-btn" id="saveBtn" onclick="saveFromForm()">Save Record</button>
+        <button class="btn-action del-btn" id="delBtn" onclick="deleteEntry()" style="display:none;">Delete Entry</button>
+    </div>
+
+    <table class="shift-table"><tbody id="shiftBody"></tbody></table>
+</div>
+
+<script>
+    let shifts = [];
+    let active = null;
+    let fileHandle = null;
+    let vMonth = new Date();
+
+    function updateClock() {
+        const now = new Date();
+        document.getElementById('liveClock').innerText = now.toLocaleDateString('en-GB') + ' ' + now.toTimeString().split(' ')[0];
+    }
+    setInterval(updateClock, 1000); updateClock();
+
+    async function initExistingDB() {
+        try {
+            [fileHandle] = await window.showOpenFilePicker({ types: [{ accept: {'application/json': ['.json']} }] });
+            const file = await fileHandle.getFile();
+            const text = await file.text();
+            if (text) {
+                const data = JSON.parse(text);
+                shifts = data.shifts || [];
+                active = data.active || null;
+            }
+            document.getElementById('dbOverlay').style.display = 'none';
+            refreshDatalists();
+            updateLiveUI();
+            render();
+        } catch (e) { alert("File access error."); }
+    }
+
+    async function initNewDB() {
+        try {
+            fileHandle = await window.showSaveFilePicker({ suggestedName: 'shifts_db.json', types: [{ accept: {'application/json': ['.json']} }] });
+            await writeToDB();
+            document.getElementById('dbOverlay').style.display = 'none';
+        } catch (e) {}
+    }
+
+    async function writeToDB() {
+        if (!fileHandle) return;
+        try {
+            const writable = await fileHandle.createWritable();
+            await writable.write(JSON.stringify({ shifts, active }));
+            await writable.close();
+        } catch (e) { alert("Permission lost. Reload file."); }
+    }
+
+    function refreshDatalists() {
+        const empDL = document.getElementById('empList'), rateDL = document.getElementById('rateList');
+        const uniqueEmps = [...new Set(shifts.map(s => s.employer))].sort();
+        const uniqueRates = [...new Set(shifts.map(s => s.rate))].sort((a,b) => b-a);
+        empDL.innerHTML = ""; uniqueEmps.forEach(e => { const opt = document.createElement('option'); opt.value = e; empDL.appendChild(opt); });
+        rateDL.innerHTML = ""; uniqueRates.forEach(r => { const opt = document.createElement('option'); opt.value = r; rateDL.appendChild(opt); });
+    }
+
+    function snapToQuarter(t) {
+        let [h, m] = t.split(':').map(Number);
+        if (m > 45) { m = 0; h = (h + 1) % 24; }
+        else if (m > 30) m = 45; else if (m > 15) m = 30; else if (m > 0) m = 15;
+        return h.toString().padStart(2, '0') + ":" + m.toString().padStart(2, '0');
+    }
+
+    async function startShift() {
+        active = { start: snapToQuarter(new Date().toTimeString().slice(0,5)), date: new Date().toISOString().split('T')[0] };
+        await writeToDB(); updateLiveUI();
+    }
+
+    async function endShift() {
+        const emp = document.getElementById('liveEmp').value;
+        const rate = document.getElementById('liveRate').value || 17.62;
+        if(!emp) return alert("Missing Employer");
+        await processAndSave({
+            employer: emp, date: active.date, taxCode: document.getElementById('liveTax').value,
+            start: active.start, end: snapToQuarter(new Date().toTimeString().slice(0,5)),
+            rate: rate, break: 0
+        });
+        active = null; await writeToDB(); updateLiveUI();
+    }
+
+    function updateLiveUI() {
+        const area = document.getElementById('liveArea'), sBtn = document.getElementById('startBtn'), eBtn = document.getElementById('endBtn');
+        if (active) {
+            area.style.display = 'block'; sBtn.style.display = 'none'; eBtn.style.display = 'block';
+            document.getElementById('displayStartTime').innerText = active.start;
+        } else {
+            area.style.display = 'none'; sBtn.style.display = 'block'; eBtn.style.display = 'none';
+        }
+    }
+
+    async function saveFromForm() {
+        const emp = document.getElementById('empInput').value, rate = document.getElementById('rateInput').value;
+        if(!emp || !rate) return alert("Missing Employer/Rate");
+        await processAndSave({
+            employer: emp, date: document.getElementById('date').value,
+            taxCode: document.getElementById('tax').value, start: document.getElementById('sTime').value,
+            end: document.getElementById('eTime').value, rate: rate, break: document.getElementById('brk').value
+        });
+        resetForm();
+    }
+
+    async function processAndSave(obj) {
+        const sH = parseInt(obj.start.split(':')[0]) || 0, sM = parseInt(obj.start.split(':')[1]) || 0;
+        const eH = parseInt(obj.end.split(':')[0]) || 0, eM = parseInt(obj.end.split(':')[1]) || 0;
+        let sT = sH * 60 + sM, eT = eH * 60 + eM;
+        if (eT <= sT) eT += 1440;
+        obj.hours = ((eT - sT - (parseInt(obj.break) || 0)) / 60).toFixed(2);
+        obj.pay = (parseFloat(obj.hours) * (parseFloat(obj.rate) || 0)).toFixed(2);
+        const idx = parseInt(document.getElementById('editIdx').value);
+        if(idx > -1) shifts[idx] = obj; else shifts.push(obj);
+        await writeToDB(); refreshDatalists(); render();
+    }
+
+    async function deleteEntry() {
+        const idx = parseInt(document.getElementById('editIdx').value);
+        if (idx > -1 && confirm("Delete entry?")) {
+            shifts.splice(idx, 1); await writeToDB(); resetForm(); refreshDatalists(); render();
+        }
+    }
+
+    function resetForm() {
+        document.getElementById('editIdx').value = "-1";
+        document.getElementById('saveBtn').innerText = "Save Record";
+        document.getElementById('delBtn').style.display = "none";
+        document.getElementById('empInput').value = "";
+    }
+
+    function render() {
+        document.getElementById('xlMonth').innerText = vMonth.toLocaleString('default', { month: 'long' });
+        document.getElementById('xlYear').innerText = vMonth.getFullYear();
+        let mG = 0; const body = document.getElementById('shiftBody'); body.innerHTML = '';
+        shifts.sort((a,b) => new Date(b.date) - new Date(a.date));
+        shifts.forEach((s, i) => {
+            const sDate = new Date(s.date);
+            if (sDate.getMonth() === vMonth.getMonth() && sDate.getFullYear() === vMonth.getFullYear()) {
+                const p = parseFloat(s.pay) || 0; mG += p;
+                body.innerHTML += `<tr class="shift-row" onclick="editRow(${i})">
+                    <td><span class="info-emp">${s.employer}</span><span class="info-meta">${s.date.split('-').reverse().slice(0,2).join('/')} • ${s.hours}h @ £${parseFloat(s.rate).toFixed(2)}</span></td>
+                    <td class="pay-gross">£${p.toFixed(2)}</td></tr>`;
+            }
+        });
+        document.getElementById('monthGross').innerText = "£" + mG.toFixed(2);
+        document.getElementById('monthDeduct').innerText = "£" + (mG * 0.28).toFixed(2);
+    }
+
+    function editRow(i) {
+        const s = shifts[i];
+        document.getElementById('editIdx').value = i;
+        document.getElementById('empInput').value = s.employer;
+        document.getElementById('date').value = s.date;
+        document.getElementById('tax').value = s.taxCode || "1255L";
+        document.getElementById('sTime').value = s.start;
+        document.getElementById('eTime').value = s.end;
+        document.getElementById('rateInput').value = s.rate;
+        document.getElementById('brk').value = s.break;
+        document.getElementById('saveBtn').innerText = "Update Entry";
+        document.getElementById('delBtn').style.display = "block";
+        window.scrollTo(0,0);
+    }
+
+    function changeMonth(n) { vMonth.setMonth(vMonth.getMonth() + n); render(); }
+    document.getElementById('date').valueAsDate = new Date();
+</script>
+</body>
+</html>
